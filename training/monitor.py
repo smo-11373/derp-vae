@@ -257,7 +257,7 @@ class Monitor:
         # Losses
         print("\nLosses:")
         if 'loss_total_mean' in summary:
-            print(f"  Total:  {summary['loss_total_mean']:.4f} ± {summary.get('loss_total_std', 0):.4f}")
+            print(f"  Total:  {summary['loss_total_mean']:.4f} +/- {summary.get('loss_total_std', 0):.4f}")
         if 'loss_img_mean' in summary:
             print(f"  Image:  {summary['loss_img_mean']:.4f}")
         if 'loss_kl_mean' in summary:

@@ -129,8 +129,8 @@ def validate(engine, val_loader):
     print(f"  Accuracy: {accuracy:.4f}")
     print(f"  Avg Prob: {all_probs.mean():.4f}")
     if calib is not None:
-        print(f"  Calib β:  {calib['beta']:.4f}")
-        print(f"  Calib α:  {calib['alpha']:.4f}")
+        print(f"  Calib beta:  {calib['beta']:.4f}")
+        print(f"  Calib alpha: {calib['alpha']:.4f}")
     
     return accuracy, all_probs.mean()
 
