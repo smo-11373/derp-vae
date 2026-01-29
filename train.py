@@ -13,6 +13,9 @@ from models.encoder import DerpEncoder
 from models.decoder import DerpDecoder
 from training.engine import DerpEngine
 from config.hyperparameters import HyperParameters
+from utils.logging import get_logger, MetricLogger
+
+logger = get_logger(__name__)
 
 
 def create_synthetic_data(n_samples=1000, img_size=(39, 39), seed=42):
@@ -67,13 +70,15 @@ def train_epoch(engine, dataloader, epoch):
         # Training step
         loss_dict = engine.training_step(img, labels)
         
-        # Print progress
+        # Log progress
         if batch_idx % 10 == 0:
-            print(f"  Batch {batch_idx}/{len(dataloader)}: "
-                  f"Loss={loss_dict['total']:.4f}, "
-                  f"KL={loss_dict['kl']:.4f}, "
-                  f"Class={loss_dict['class']:.4f}, "
-                  f"DERP={loss_dict['derp']:.4f}")
+            logger.debug(
+                f"Batch {batch_idx}/{len(dataloader)}: "
+                f"Loss={loss_dict['total']:.4f}, "
+                f"KL={loss_dict['kl']:.4f}, "
+                f"Class={loss_dict['class']:.4f}, "
+                f"DERP={loss_dict['derp']:.4f}"
+            )
     
     # Update adaptive scales at end of epoch
     engine.update_scales()
@@ -125,12 +130,12 @@ def validate(engine, val_loader):
     engine.monitor.collect_predictions(all_probs, all_labels)
     calib = engine.monitor.compute_calibration()
     
-    print(f"\nValidation Results:")
-    print(f"  Accuracy: {accuracy:.4f}")
-    print(f"  Avg Prob: {all_probs.mean():.4f}")
+    logger.info("Validation Results:")
+    logger.info(f"  Accuracy: {accuracy:.4f}")
+    logger.info(f"  Avg Prob: {all_probs.mean():.4f}")
     if calib is not None:
-        print(f"  Calib beta:  {calib['beta']:.4f}")
-        print(f"  Calib alpha: {calib['alpha']:.4f}")
+        logger.info(f"  Calib beta:  {calib['beta']:.4f}")
+        logger.info(f"  Calib alpha: {calib['alpha']:.4f}")
     
     return accuracy, all_probs.mean()
 
@@ -165,36 +170,53 @@ def train(hp, train_loader, val_loader, device):
     # Initialize engine
     engine = DerpEngine(encoder, decoder, hp, device)
     
-    print("\n" + "="*60)
-    print("DERP-VAE Training")
-    print("="*60)
-    print(f"Device: {device}")
-    print(f"Encoder params: {sum(p.numel() for p in encoder.parameters()):,}")
-    print(f"Decoder params: {sum(p.numel() for p in decoder.parameters()):,}")
-    print(f"Training batches: {len(train_loader)}")
-    print(f"Validation batches: {len(val_loader)}")
-    print("="*60 + "\n")
+    logger.info("=" * 60)
+    logger.info("DERP-VAE Training")
+    logger.info("=" * 60)
+    logger.info(f"Device: {device}")
+    logger.info(f"Encoder params: {sum(p.numel() for p in encoder.parameters()):,}")
+    logger.info(f"Decoder params: {sum(p.numel() for p in decoder.parameters()):,}")
+    logger.info(f"Training batches: {len(train_loader)}")
+    logger.info(f"Validation batches: {len(val_loader)}")
+    logger.info("=" * 60)
+
+    metric_logger = MetricLogger(logger)
     
     history = []
     
     for epoch in range(hp.epochs):
-        print(f"\nEpoch {epoch+1}/{hp.epochs}")
-        print("-" * 60)
-        
+        logger.info(f"Epoch {epoch+1}/{hp.epochs}")
+        logger.info("-" * 60)
+
         # Train
         summary = train_epoch(engine, train_loader, epoch)
         summary['epoch'] = epoch
         history.append(summary)
-        
+
+        # Log metrics
+        metric_logger.log_metrics(
+            epoch=epoch + 1,
+            metrics={
+                "loss": summary.get("loss_total_mean", 0.0),
+                "msi": summary.get("msi", 0.0),
+            },
+        )
+        if "msi" in summary:
+            metric_logger.log_health(
+                msi=summary.get("msi", 0.0),
+                beta=summary.get("beta", 0.0),
+                separation=summary.get("px_separation", 0.0),
+            )
+
         # Validate
         if (epoch + 1) % hp.val_every == 0 or epoch == hp.epochs - 1:
             val_acc, val_prob = validate(engine, val_loader)
             summary['val_accuracy'] = val_acc
             summary['val_prob'] = val_prob
-    
-    print("\n" + "="*60)
-    print("Training Complete!")
-    print("="*60 + "\n")
+
+    logger.info("=" * 60)
+    logger.info("Training Complete!")
+    logger.info("=" * 60)
     
     return engine, history
 
@@ -220,7 +242,7 @@ def main():
     hp.lr = args.lr
     
     # Generate data
-    print("Generating synthetic data...")
+    logger.info("Generating synthetic data...")
     images, labels = create_synthetic_data(n_samples=args.n_samples)
     
     # Create dataset
@@ -256,7 +278,7 @@ def main():
         'history': history
     }, 'derp_vae_model.pt')
     
-    print("Model saved to derp_vae_model.pt")
+    logger.info("Model saved to derp_vae_model.pt")
 
 
 if __name__ == "__main__":
