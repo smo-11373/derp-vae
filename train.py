@@ -13,9 +13,9 @@ from models.encoder import DerpEncoder
 from models.decoder import DerpDecoder
 from training.engine import DerpEngine
 from config.hyperparameters import HyperParameters
-from utils.logging import get_logger, MetricLogger
+from utils.logging import get_training_logger, MetricLogger
 
-logger = get_logger(__name__)
+logger = get_training_logger()
 
 
 def create_synthetic_data(n_samples=1000, img_size=(39, 39), seed=42):
