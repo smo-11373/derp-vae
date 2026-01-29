@@ -132,15 +132,15 @@ def example_4_monitoring():
     # Check health
     print(f"\nHealth Check:")
     if 'msi' in summary:
-        status = "✓ HEALTHY" if summary.get('msi_healthy', False) else "✗ UNHEALTHY"
+        status = "[OK]" if summary.get('msi_healthy', False) else "[WARN]"
         print(f"  MSI:     {summary['msi']:.4f} {status}")
-    
+
     if 'beta' in summary:
-        status = "✓ HEALTHY" if summary.get('beta_healthy', False) else "✗ UNHEALTHY"
+        status = "[OK]" if summary.get('beta_healthy', False) else "[WARN]"
         print(f"  Beta:    {summary['beta']:.4f} {status}")
-    
+
     if 'px_separation' in summary:
-        status = "✓ HEALTHY" if summary.get('px_sep_healthy', False) else "✗ UNHEALTHY"
+        status = "[OK]" if summary.get('px_sep_healthy', False) else "[WARN]"
         print(f"  px Sep:  {summary['px_separation']:.4f} {status}")
 
 

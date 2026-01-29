@@ -39,7 +39,11 @@ class Monitor:
             'kl': [],
             'class': [],
             'rec': [],
-            'derp': []
+            'derp': [],
+            'rp_z0': [],
+            'rp_z1': [],
+            'rp_dz': [],
+            'rp_px': []
         }
     
     def collect_batch(self, z0, z1, img0, img1, px0, px1, labels, losses):
@@ -268,15 +272,15 @@ class Monitor:
         # Health metrics
         print("\nHealth Metrics:")
         if 'msi' in summary:
-            status = "✓" if summary.get('msi_healthy', False) else "✗"
+            status = "[OK]" if summary.get('msi_healthy', False) else "[WARN]"
             print(f"  MSI:         {summary['msi']:.4f} {status} (target: > 0.80)")
-        
+
         if 'beta' in summary:
-            status = "✓" if summary.get('beta_healthy', False) else "✗"
-            print(f"  Calib β:     {summary['beta']:.4f} {status} (target: 0.05-0.50)")
-        
+            status = "[OK]" if summary.get('beta_healthy', False) else "[WARN]"
+            print(f"  Calib beta:  {summary['beta']:.4f} {status} (target: 0.05-0.50)")
+
         if 'px_separation' in summary:
-            status = "✓" if summary.get('px_sep_healthy', False) else "✗"
+            status = "[OK]" if summary.get('px_sep_healthy', False) else "[WARN]"
             print(f"  px Sep:      {summary['px_separation']:.4f} {status} (target: > 0.02)")
         
         # RMSE
