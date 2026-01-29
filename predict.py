@@ -106,7 +106,7 @@ def analyze_predictions(probs, labels=None):
     bins = np.linspace(0, 1, 11)
     counts, _ = np.histogram(probs, bins=bins)
     for i in range(len(counts)):
-        bar = "█" * int(counts[i] / counts.max() * 50)
+        bar = "#" * int(counts[i] / counts.max() * 50)
         print(f"  [{bins[i]:.1f}-{bins[i+1]:.1f}]: {bar} ({counts[i]})")
     
     if labels is not None:
