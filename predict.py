@@ -10,6 +10,9 @@ import argparse
 from models.encoder import DerpEncoder
 from models.decoder import DerpDecoder
 from training.engine import DerpEngine
+from utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def load_model(checkpoint_path, device='cuda'):
@@ -77,57 +80,59 @@ def predict_batch(engine, images):
 def analyze_predictions(probs, labels=None):
     """
     Analyze prediction distribution
-    
+
     Args:
         probs: (n,) predicted probabilities
         labels: (n,) true labels (optional)
     """
-    print("\n" + "="*60)
-    print("Prediction Analysis")
-    print("="*60)
-    
-    print(f"\nProbability Statistics:")
-    print(f"  Mean:   {probs.mean():.4f}")
-    print(f"  Median: {np.median(probs):.4f}")
-    print(f"  Std:    {probs.std():.4f}")
-    print(f"  Min:    {probs.min():.4f}")
-    print(f"  Max:    {probs.max():.4f}")
-    
+    logger.info("=" * 60)
+    logger.info("Prediction Analysis")
+    logger.info("=" * 60)
+
+    logger.info("Probability Statistics:")
+    logger.info(f"  Mean:   {probs.mean():.4f}")
+    logger.info(f"  Median: {np.median(probs):.4f}")
+    logger.info(f"  Std:    {probs.std():.4f}")
+    logger.info(f"  Min:    {probs.min():.4f}")
+    logger.info(f"  Max:    {probs.max():.4f}")
+
     # Edge distribution
     edges = np.abs(probs - 0.5)
-    print(f"\nEdge Statistics:")
-    print(f"  Mean edge:     {edges.mean():.4f}")
-    print(f"  Edge > 0.02:   {(edges > 0.02).sum()} / {len(edges)} ({(edges > 0.02).mean()*100:.1f}%)")
-    print(f"  Edge > 0.05:   {(edges > 0.05).sum()} / {len(edges)} ({(edges > 0.05).mean()*100:.1f}%)")
-    print(f"  Edge > 0.10:   {(edges > 0.10).sum()} / {len(edges)} ({(edges > 0.10).mean()*100:.1f}%)")
-    
+    logger.info("Edge Statistics:")
+    logger.info(f"  Mean edge:     {edges.mean():.4f}")
+    logger.info(f"  Edge > 0.02:   {(edges > 0.02).sum()} / {len(edges)} ({(edges > 0.02).mean()*100:.1f}%)")
+    logger.info(f"  Edge > 0.05:   {(edges > 0.05).sum()} / {len(edges)} ({(edges > 0.05).mean()*100:.1f}%)")
+    logger.info(f"  Edge > 0.10:   {(edges > 0.10).sum()} / {len(edges)} ({(edges > 0.10).mean()*100:.1f}%)")
+
     # Histogram
-    print(f"\nProbability Histogram:")
+    logger.info("Probability Histogram:")
     bins = np.linspace(0, 1, 11)
     counts, _ = np.histogram(probs, bins=bins)
     for i in range(len(counts)):
         bar = "#" * int(counts[i] / counts.max() * 50)
-        print(f"  [{bins[i]:.1f}-{bins[i+1]:.1f}]: {bar} ({counts[i]})")
-    
+        logger.info(f"  [{bins[i]:.1f}-{bins[i+1]:.1f}]: {bar} ({counts[i]})")
+
     if labels is not None:
         # Accuracy
         predictions = (probs > 0.5).astype(int)
         accuracy = (predictions == labels).mean()
-        
-        print(f"\nAccuracy: {accuracy:.4f}")
-        
+
+        logger.info(f"Accuracy: {accuracy:.4f}")
+
         # Calibration by decile
-        print(f"\nCalibration by Decile:")
+        logger.info("Calibration by Decile:")
         deciles = np.percentile(probs, np.arange(0, 101, 10))
         for i in range(10):
             mask = (probs >= deciles[i]) & (probs < deciles[i+1])
             if mask.sum() > 0:
                 mean_prob = probs[mask].mean()
                 mean_label = labels[mask].mean()
-                print(f"  Decile {i+1}: Pred={mean_prob:.3f}, Actual={mean_label:.3f}, "
-                      f"n={mask.sum()}")
-    
-    print("="*60 + "\n")
+                logger.info(
+                    f"  Decile {i+1}: Pred={mean_prob:.3f}, Actual={mean_label:.3f}, "
+                    f"n={mask.sum()}"
+                )
+
+    logger.info("=" * 60)
 
 
 def main():
@@ -144,33 +149,35 @@ def main():
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
     
     # Load model
-    print(f"Loading model from {args.checkpoint}...")
+    logger.info(f"Loading model from {args.checkpoint}...")
     engine, hp = load_model(args.checkpoint, device)
-    
-    print(f"Model loaded successfully!")
-    print(f"  Latent dim: {hp.latent_dim}")
-    print(f"  Image size: {hp.img_size}")
-    
+
+    logger.info("Model loaded successfully!")
+    logger.info(f"  Latent dim: {hp.latent_dim}")
+    logger.info(f"  Image size: {hp.img_size}")
+
     # Generate test data
-    print(f"\nGenerating {args.n_samples} test samples...")
+    logger.info(f"Generating {args.n_samples} test samples...")
     test_images = torch.randn(args.n_samples, 1, hp.img_size[0], hp.img_size[1])
-    
+
     # Create weak labels for evaluation
     img_mean = test_images.mean(dim=(1, 2, 3))
     test_labels = (img_mean > img_mean.median()).long().numpy()
-    
+
     # Predict
-    print("Predicting...")
+    logger.info("Predicting...")
     probs = predict_batch(engine, test_images)
-    
+
     # Analyze
     analyze_predictions(probs, test_labels)
-    
+
     # Example predictions
-    print("Example Predictions:")
+    logger.info("Example Predictions:")
     for i in range(min(10, args.n_samples)):
-        print(f"  Sample {i}: Prob={probs[i]:.4f}, Label={test_labels[i]}, "
-              f"Pred={int(probs[i] > 0.5)}")
+        logger.info(
+            f"  Sample {i}: Prob={probs[i]:.4f}, Label={test_labels[i]}, "
+            f"Pred={int(probs[i] > 0.5)}"
+        )
 
 
 if __name__ == "__main__":
