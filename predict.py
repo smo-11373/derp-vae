@@ -10,9 +10,9 @@ import argparse
 from models.encoder import DerpEncoder
 from models.decoder import DerpDecoder
 from training.engine import DerpEngine
-from utils.logging import get_logger
+from utils.logging import get_training_logger
 
-logger = get_logger(__name__)
+logger = get_training_logger(experiment_name="predict")
 
 
 def load_model(checkpoint_path, device='cuda'):
