@@ -259,7 +259,8 @@ class DerpEngine:
     
     def predict_stable(self, img_test):
         """
-        Stabilized Bayesian prediction using log-sum-exp
+        Stabilized Bayesian prediction using log-sum-exp.
+        Based on [14a] from the document - Full NLL without recovery term.
 
         Args:
             img_test: (1, 1, H, W) single test image
@@ -271,39 +272,59 @@ class DerpEngine:
         self.decoder.eval()
 
         log_l_accum = {0: [], 1: []}
+        img_gscale = self.hp.Gscale * self.img_rmse
+        px_gscale = self.hp.Gscale * self.px_rmse
 
         with torch.no_grad():
             for r in [0, 1]:
-                # Hypothesis mean for px0
+                # Hypothesis mean for px0 [11a]
                 m_px0 = 0.5 + (self.hp.pxBias if r == 1 else -self.hp.pxBias)
 
                 for _ in range(self.hp.S_pred):
-                    # Encode hypothesis path
-                    px0 = torch.full((1, 1), m_px0, device=self.device)
-                    m0, s0 = self.encoder(img_test, px0)
+                    # === 1. x_input => x0 (sampler) [11b-d] ===
+                    px0 = torch.randn(1, 1, device=self.device) * self.hp.pxStdev + m_px0
+                    px0 = torch.clamp(px0, 0.1, 0.9)
+                    img0 = img_test + torch.randn_like(img_test) * img_gscale
+
+                    # === 2. x0 => z0 (encode) [7a] ===
+                    m0, s0 = self.encoder(img0, px0)
                     z0 = m0 + s0 * torch.randn_like(m0)
 
-                    # Decode
+                    # === 3. z0 => theta_x (decode) ===
                     Timg, Tpx = self.decoder(z0)
 
-                    # Sample noisy x1 (consistent with training)
-                    img1 = Timg + torch.randn_like(Timg) * (self.hp.Gscale * self.img_rmse)
-                    px1 = Tpx + torch.randn_like(Tpx) * (self.hp.Gscale * self.px_rmse)
+                    # === 4. theta_x => x1 (sample with noise) [8a-b] ===
+                    img1 = Timg + torch.randn_like(Timg) * img_gscale
+                    px1 = Tpx + torch.randn_like(Tpx) * px_gscale
                     px1 = torch.clamp(px1, 0.0, 1.0)
 
-                    # Recovery: encode noisy x1
-                    m1, _ = self.encoder(img1, px1)
+                    # === Compute NLL from [14a] ===
 
-                    # Energy calculation (NLL)
-                    e_img = 0.5 * torch.sum(((img_test - Timg) / self.img_rmse) ** 2)
-                    e_rec = 0.5 * torch.sum(((z0 - m1) / self.z_rmse) ** 2)
+                    # Term 1: x_input => x0
+                    e_x0_img = 0.5 * torch.sum(((img0 - img_test) / img_gscale) ** 2)
+                    e_x0_px = 0.5 * torch.sum(((px0 - m_px0) / self.hp.pxStdev) ** 2)
 
-                    # Bimodal prior likelihood
-                    phi0 = torch.exp(-0.5 * ((Tpx - (0.5 - self.hp.pxBias)) / self.hp.pxStdev) ** 2)
-                    phi1 = torch.exp(-0.5 * ((Tpx - (0.5 + self.hp.pxBias)) / self.hp.pxStdev) ** 2)
+                    # Term 2: x0 => z0 (encoder)
+                    e_enc = 0.5 * torch.sum(((z0 - m0) / s0) ** 2) + torch.sum(torch.log(s0 + 1e-8))
+
+                    # Term 3: z0 prior
+                    e_z0 = 0.5 * torch.sum(z0 ** 2)
+
+                    # Term 4: theta_x => x1
+                    e_theta_img = 0.5 * torch.sum(((img1 - Timg) / img_gscale) ** 2)
+                    e_theta_px = 0.5 * torch.sum(((px1 - Tpx) / px_gscale) ** 2)
+
+                    # Term 5: x1 => x_input (reconstruction + classification)
+                    e_img = 0.5 * torch.sum(((img_test - img1) / img_gscale) ** 2)
+
+                    # binaryLoss(label=r, px1) [10b]
+                    phi0 = torch.exp(-0.5 * ((px1 - (0.5 - self.hp.pxBias)) / self.hp.pxStdev) ** 2)
+                    phi1 = torch.exp(-0.5 * ((px1 - (0.5 + self.hp.pxBias)) / self.hp.pxStdev) ** 2)
                     p_r = phi1 / (phi0 + phi1 + 1e-8) if r == 1 else phi0 / (phi0 + phi1 + 1e-8)
+                    e_class = -torch.log(p_r + 1e-8)
 
-                    nll = e_img + e_rec - torch.log(p_r + 1e-8)
+                    # Total NLL [14a]
+                    nll = e_x0_img + e_x0_px + e_enc + e_z0 + e_theta_img + e_theta_px + e_img + e_class
                     log_l_accum[r].append(-nll)
 
         # Aggregate using log-sum-exp (prevents underflow)
