@@ -84,43 +84,36 @@ class DerpEngine:
         
         return img0, px0
     
-    def forward_chain(self, img_in, labels, training=True):
+    def forward_chain(self, img_in, labels):
         """
         Complete forward chain: x_input -> x0 -> z0 -> x1 -> z1
-        
+
         Args:
             img_in: (batch, 1, H, W)
             labels: (batch,)
-            training: If True, encode noisy x1; if False, encode parameters
-        
+
         Returns:
             dict with all intermediate values
         """
         # 1. Sampler: x_input -> x0
         img0, px0 = self.sampler(img_in, labels)
-        
+
         # 2. Encoder: x0 -> theta_z0 -> z0
         m0, s0 = self.encoder(img0, px0)
         z0 = m0 + s0 * torch.randn_like(m0)
-        
+
         # 3. Decoder: z0 -> theta_x
         Timg, Tpx = self.decoder(z0)
-        
+
         # 4. Sample x1 from theta_x (with noise for manifold volume)
         img1 = Timg + torch.randn_like(Timg) * (self.hp.Gscale * self.img_rmse)
         px1 = Tpx + torch.randn_like(Tpx) * (self.hp.Gscale * self.px_rmse)
         px1 = torch.clamp(px1, 0.0, 1.0)
-        
-        # 5. Re-encode to get z1
-        if training:
-            # Training: encode noisy sample x1
-            m1, s1 = self.encoder(img1, px1)
-        else:
-            # Prediction: encode deterministic parameters theta_x
-            m1, s1 = self.encoder(Timg, Tpx)
-        
+
+        # 5. Re-encode noisy x1 to get z1 (consistent for train and predict)
+        m1, s1 = self.encoder(img1, px1)
         z1 = m1 + s1 * torch.randn_like(m1)
-        
+
         return {
             'img0': img0,
             'px0': px0,
@@ -225,7 +218,7 @@ class DerpEngine:
         self.optimizer.zero_grad()
         
         # Forward chain
-        chain = self.forward_chain(img_in, labels, training=True)
+        chain = self.forward_chain(img_in, labels)
         
         # Compute losses
         total_loss, loss_dict = self.compute_losses(chain, img_in, labels)
@@ -267,55 +260,60 @@ class DerpEngine:
     def predict_stable(self, img_test):
         """
         Stabilized Bayesian prediction using log-sum-exp
-        
+
         Args:
             img_test: (1, 1, H, W) single test image
-        
+
         Returns:
             prob: scalar probability of label=1
         """
         self.encoder.eval()
         self.decoder.eval()
-        
+
         log_l_accum = {0: [], 1: []}
-        
+
         with torch.no_grad():
             for r in [0, 1]:
                 # Hypothesis mean for px0
                 m_px0 = 0.5 + (self.hp.pxBias if r == 1 else -self.hp.pxBias)
-                
+
                 for _ in range(self.hp.S_pred):
                     # Encode hypothesis path
                     px0 = torch.full((1, 1), m_px0, device=self.device)
                     m0, s0 = self.encoder(img_test, px0)
                     z0 = m0 + s0 * torch.randn_like(m0)
-                    
+
                     # Decode
                     Timg, Tpx = self.decoder(z0)
-                    
-                    # Recovery: encode parameters (deterministic)
-                    m1, _ = self.encoder(Timg, Tpx)
-                    
+
+                    # Sample noisy x1 (consistent with training)
+                    img1 = Timg + torch.randn_like(Timg) * (self.hp.Gscale * self.img_rmse)
+                    px1 = Tpx + torch.randn_like(Tpx) * (self.hp.Gscale * self.px_rmse)
+                    px1 = torch.clamp(px1, 0.0, 1.0)
+
+                    # Recovery: encode noisy x1
+                    m1, _ = self.encoder(img1, px1)
+
                     # Energy calculation (NLL)
                     e_img = 0.5 * torch.sum(((img_test - Timg) / self.img_rmse) ** 2)
                     e_rec = 0.5 * torch.sum(((z0 - m1) / self.z_rmse) ** 2)
-                    
+
                     # Bimodal prior likelihood
                     phi0 = torch.exp(-0.5 * ((Tpx - (0.5 - self.hp.pxBias)) / self.hp.pxStdev) ** 2)
                     phi1 = torch.exp(-0.5 * ((Tpx - (0.5 + self.hp.pxBias)) / self.hp.pxStdev) ** 2)
                     p_r = phi1 / (phi0 + phi1 + 1e-8) if r == 1 else phi0 / (phi0 + phi1 + 1e-8)
-                    
+
                     nll = e_img + e_rec - torch.log(p_r + 1e-8)
                     log_l_accum[r].append(-nll)
-        
+
         # Aggregate using log-sum-exp (prevents underflow)
         l0 = torch.stack(log_l_accum[0])
         l1 = torch.stack(log_l_accum[1])
-        
+
         log_avg_0 = torch.logsumexp(l0, dim=0) - np.log(self.hp.S_pred)
         log_avg_1 = torch.logsumexp(l1, dim=0) - np.log(self.hp.S_pred)
-        
+
         # Sigmoid for numerical stability
         prob = torch.sigmoid(log_avg_1 - log_avg_0).item()
-        
+
         return prob
